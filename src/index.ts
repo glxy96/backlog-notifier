@@ -14,7 +14,18 @@ export default {
       const apiUrl = buildBacklogApiUrl(env.BACKLOG_SPACE_ID, queryParams);
       //URLのログ出力
       console.log(`Backlog API URL: ${apiUrl}`);
-      return new Response(`Constructed Query URL: ${apiUrl}`);
+
+      //URLの内容を取得する
+      const backlogResponse = await fetch(apiUrl);
+      if (!backlogResponse.ok) {
+        throw new Error(`Backlog API request failed: ${backlogResponse.statusText}`);
+      }
+
+      const json = await backlogResponse.json();
+
+      return new Response(JSON.stringify(json, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
 
     //   // 2. 送信メッセージの構築処理
     //   const message = formatSlackMessage(tickets);
@@ -28,7 +39,7 @@ export default {
       return new Response("Internal Server Error", { status: 500 });
     }
   }
-};
+} satisfies ExportedHandler<Env>;
 
 // BacklogのAPIエンドポイントURLを構築
 function buildBacklogApiUrl(spaceId: string, queryParams: string): string {
