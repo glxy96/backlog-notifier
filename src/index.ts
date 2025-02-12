@@ -6,7 +6,7 @@ export interface Env {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async scheduled(_scheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     try {
       // 現在の日付を取得（抽出実行日）
       const today = new Date().toISOString().split("T")[0];
@@ -18,14 +18,15 @@ export default {
 
       // メッセージを整形
       const message = createSlackBlocks(updatedIssues, unloggedTimeIssues, unresolvedIssues, env);
-      
+
       // Slackへ通知
-      return await sendSlackNotification(env, updatedIssues, unloggedTimeIssues, unresolvedIssues);
+      await sendSlackNotification(env, updatedIssues, unloggedTimeIssues, unresolvedIssues);
+
+      console.log("通知完了:", today);
     } catch (error) {
-      console.error("Error:", error);
-      return new Response("Internal Server Error", { status: 500 });
+      console.error("エラー:", error);
     }
-  },
+  }
 } satisfies ExportedHandler<Env>;
 
 /**

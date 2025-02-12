@@ -9,6 +9,9 @@
   "compatibility_date": "2025-02-04",
   "observability": {
     "enabled": true
+  },
+    "triggers": {
+    "crons": ["0 3 * * 3"]  // 毎週水曜日の12:00 JST に実行
   }
   /**
    * Smart Placement
