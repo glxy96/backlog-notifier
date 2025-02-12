@@ -11,18 +11,31 @@ export default {
       // 現在の日付を取得（抽出実行日）
       const today = new Date().toISOString().split("T")[0];
 
-      //URLの内容を取得する
-      const backlogResponse = await fetch(apiUrl);
-      if (!backlogResponse.ok) {
-        throw new Error(`Backlog API request failed: ${backlogResponse.statusText}`);
-      }
+      // 各条件の課題取得
+      const updatedIssues = await fetchUpdatedIssues(env, today);
+      const unloggedTimeIssues = await fetchUnloggedTimeIssues(env, today);
+      const unresolvedIssues = await fetchUnresolvedIssues(env, today);
 
-      const json = await backlogResponse.json();
-
-      return new Response(JSON.stringify(json, null, 2), {
+      // JSONデータを整形して返す
+      return new Response(
+        JSON.stringify(
+          {
+            updatedIssues,
+            unloggedTimeIssues,
+            unresolvedIssues,
+          },
+          null,
+          2
+        ),
+        {
         headers: { "Content-Type": "application/json" },
-      });
-
+        }
+      );
+    } catch (error) {
+      console.error("Error:", error);
+      return new Response("Internal Server Error", { status: 500 });
+    }
+  },
     //   // 2. 送信メッセージの構築処理
     //   const message = formatSlackMessage(tickets);
 
@@ -30,11 +43,6 @@ export default {
     //   await sendSlackNotification(env, message);
 
     //   return new Response("Slack notification sent!", { status: 200 });
-    } catch (error) {
-      console.error("Error:", error);
-      return new Response("Internal Server Error", { status: 500 });
-    }
-  }
 } satisfies ExportedHandler<Env>;
 
 /**
