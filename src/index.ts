@@ -1,5 +1,5 @@
 export interface Env {
-  SLACK_BOT_API_KEY: string;
+  SLACK_BOT_TOKEN: string;
   BACKLOG_API_KEY: string;
   BACKLOG_SPACE_ID: string;
   BACKLOG_PROJECT_ID: string;
@@ -11,27 +11,21 @@ export default {
       // 現在の日付を取得（抽出実行日）
       const today = new Date().toISOString().split("T")[0];
 
-      // 各条件の課題取得
+      // チケットデータ取得
       const updatedIssues = await fetchUpdatedIssues(env, today);
       const unloggedTimeIssues = await fetchUnloggedTimeIssues(env, today);
       const unresolvedIssues = await fetchUnresolvedIssues(env, today);
 
-      // メッセージの構築処理
-      const message = formatSlackMessage(updatedIssues, unloggedTimeIssues, unresolvedIssues, env);
+      // メッセージを整形
+      const message = createSlackBlocks(updatedIssues, unloggedTimeIssues, unresolvedIssues, env);
       
-      // 構築したメッセージの確認
-      return new Response (message);
-
+      // Slackへ通知
+      return await sendSlackNotification(env, updatedIssues, unloggedTimeIssues, unresolvedIssues);
     } catch (error) {
       console.error("Error:", error);
       return new Response("Internal Server Error", { status: 500 });
     }
   },
-
-    //   // 3. Slack Botによるメッセージ送信処理
-    //   await sendSlackNotification(env, message);
-
-    //   return new Response("Slack notification sent!", { status: 200 });
 } satisfies ExportedHandler<Env>;
 
 /**
@@ -106,61 +100,66 @@ async function fetchBacklogTickets(env: Env, queryParams: URLSearchParams): Prom
 }
 
 /**
- * メッセージ構築処理
- * fetchBacklogTicketsで取得したチケットからメッセージを構築する。
+ * Block Kitを使ったSlackメッセージを生成
  */
-function formatSlackMessage(
-  updatedIssues: any[],
-  unloggedTimeIssues: any[],
-  unresolvedIssues: any[],
-  env: Env
-): string {
-  function formatIssues(issues: any[]): string {
+function createSlackBlocks(updatedIssues: any[], unloggedTimeIssues: any[], unresolvedIssues: any[], env: Env) {
+  function formatIssuesBlock(title: string, issues: any[]): any[] {
     if (issues.length === 0) {
-      return "* なし";
+      return [{
+        type: "section",
+        text: { type: "mrkdwn", text: `*${title}*\nなし` }
+      }];
     }
-    return issues
-      .map(
-        (issue) =>
-          `* [${issue.summary}](https://${env.BACKLOG_SPACE_ID}.backlog.jp/view/${issue.issueKey}) 担当: ${issue.assignee ? issue.assignee.name : "未設定"}`
-      )
-      .join("\n");
+
+    return [
+      { type: "section", text: { type: "mrkdwn", text: `*${title}*` } },
+      ...issues.map((issue) => ({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `• <https://${env.BACKLOG_SPACE_ID}.backlog.jp/view/${issue.issueKey}|${issue.summary}> | 担当: ${issue.assignee ? issue.assignee.name : "未設定"}`
+        }
+      }))
+    ];
   }
 
-  return `
-## 完了以外のチケット
-
-${formatIssues(updatedIssues)}
-
-## 完了理由未設定のチケット
-
-${formatIssues(unresolvedIssues)}
-
-## 実績時間未入力のチケット
-
-${formatIssues(unloggedTimeIssues)}
-  `.trim();
+  return [
+    { type: "header", text: { type: "plain_text", text: "📢 チケット更新チェック", emoji: true } },
+    ...formatIssuesBlock("🚨 未更新のチケット", updatedIssues),
+    ...formatIssuesBlock("❓ 完了理由未設定のチケット", unresolvedIssues),
+    ...formatIssuesBlock("⏳ 実績時間未入力のチケット", unloggedTimeIssues)
+  ];
 }
 
-// /**
-//  * メッセージ送信処理
-//  */
-// async function sendSlackNotification(env: Env, message: string) {
-//   const slackUrl = "https://slack.com/api/chat.postMessage";
+/**
+ * SlackにBlock Kitを使ってメッセージを送信
+ */
+async function sendSlackNotification(env: Env, updatedIssues: any[], unloggedTimeIssues: any[], unresolvedIssues: any[]): Promise<Response> {
+  if (!env.SLACK_BOT_TOKEN) {
+    console.error("SLACK_BOT_TOKEN が設定されていません");
+    return new Response("Slack Bot Token is missing", { status: 500 });
+  }
 
-//   const payload = {
-//     channel: "#general", // 送信先のチャンネル（必要なら環境変数化）
-//     text: message,
-//   };
+  const payload = {
+    channel: "#general", // 送信するチャンネル
+    blocks: createSlackBlocks(updatedIssues, unloggedTimeIssues, unresolvedIssues, env),
+  };
 
-//   const response = await fetch(slackUrl, {
-//     method: "POST",
-//     headers: {
-//       "Content-Type": "application/json",
-//       Authorization: `Bearer ${env.SLACK_BOT_API_KEY}`,
-//     },
-//     body: JSON.stringify(payload),
-//   });
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 
-//   if (!response.ok) throw new Error("Failed to send Slack message");
-// }
+  const result = await response.json() as { ok: boolean; error?: string };
+
+  if (!result.ok) {
+    console.error("Slack通知エラー:", result.error);
+    return new Response(`Slack notification failed: ${result.error}`, { status: 500 });
+  }
+
+  return new Response("Slack notification sent!", { status: 200 });
+}
