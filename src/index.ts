@@ -8,12 +8,8 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      // 1. Backlogのチケット取得
-      // クエリパラメータ構築
-      const queryParams = buildQueryParams(env);
-      const apiUrl = buildBacklogApiUrl(env.BACKLOG_SPACE_ID, queryParams);
-      //URLのログ出力
-      console.log(`Backlog API URL: ${apiUrl}`);
+      // 現在の日付を取得（抽出実行日）
+      const today = new Date().toISOString().split("T")[0];
 
       //URLの内容を取得する
       const backlogResponse = await fetch(apiUrl);
@@ -41,45 +37,106 @@ export default {
   }
 } satisfies ExportedHandler<Env>;
 
-// BacklogのAPIエンドポイントURLを構築
-function buildBacklogApiUrl(spaceId: string, queryParams: string): string {
-  return `https://${spaceId}.backlog.com/api/v2/issues?${queryParams}`;
-}
+/**
+ * 更新漏れチケットの取得
+ * 期限日が実行日 かつ 完了以外のチケット
+ */
+async function fetchUpdatedIssues(env: Env, today: string): Promise<any[]> {
+  const queryParams = new URLSearchParams();
+  queryParams.append("apiKey", env.BACKLOG_API_KEY);
+  queryParams.append("projectId[]", env.BACKLOG_PROJECT_ID);
+  queryParams.append("dueDateSince", today);
+  queryParams.append("dueDateUntil", today);
+  queryParams.append("statusId[]", "1"); // 未対応
+  queryParams.append("statusId[]", "2"); // 処理中
+  queryParams.append("statusId[]", "3"); // 処理済み
+  queryParams.append("count", "100"); // 取得上限の指定。指定しない場合は20件
 
-// クエリパラメータの構築関数
-function buildQueryParams(env: Env): string {
-  const params = new URLSearchParams();
-  
-  // 認証キー
-  params.append('apiKey', env.BACKLOG_API_KEY);
-  
-  // プロジェクトID（環境変数から取得）
-  params.append('projectId[]', env.BACKLOG_PROJECT_ID);
-  
-  // ステータス（未対応のチケット）
-  params.append('statusId[]', '1');
-  
-  // 取得件数
-  params.append('count', '10');
-
-  // ソート順（新しい順）
-  params.append('sort', 'created');
-  params.append('order', 'desc');
-
-  return params.toString();
+  return fetchBacklogTickets(env, queryParams);
 }
 
 /**
- * チケット取得処理
- * Backlog APIはcurlでjson形式のチケット一覧を返す。
- * クエリパラメータの指定で条件に合致するチケットに絞って取得できる。
+ * 実績時間未入力チケットの取得
+ * 期限日が実行日 かつ 完了 かつ actualHours が未入力 のうち、完了理由が「対応しない」を除外
  */
+async function fetchUnloggedTimeIssues(env: Env, today: string): Promise<any[]> {
+  const queryParams = new URLSearchParams();
+  queryParams.append("apiKey", env.BACKLOG_API_KEY);
+  queryParams.append("projectId[]", env.BACKLOG_PROJECT_ID);
+  queryParams.append("dueDateSince", today);
+  queryParams.append("dueDateUntil", today);
+  queryParams.append("statusId[]", "4"); // 完了
+  queryParams.append("count", "100");
+
+  const issues = await fetchBacklogTickets(env, queryParams);
+
+  // actualHoursが未入力 かつ resolution.id !== 1 のものを抽出
+  return issues.filter((issue) => issue.actualHours === null && issue.resolution?.id !== 1);
+}
 
 /**
- * メッセージ構築処理
- * fetchBacklogTicketsで取得したチケットからメッセージを構築する。
+ * 完了理由未設定チケットの取得
+ * 期限日が実行日 かつ 完了 かつ resolution が未設定
  */
+async function fetchUnresolvedIssues(env: Env, today: string): Promise<any[]> {
+  const queryParams = new URLSearchParams();
+  queryParams.append("apiKey", env.BACKLOG_API_KEY);
+  queryParams.append("projectId[]", env.BACKLOG_PROJECT_ID);
+  queryParams.append("dueDateSince", today);
+  queryParams.append("dueDateUntil", today);
+  queryParams.append("statusId[]", "4"); // 完了
+  queryParams.append("count", "100");
+
+  const issues = await fetchBacklogTickets(env, queryParams);
+
+  // 完了理由が未設定のものを抽出
+  return issues.filter((issue) => issue.resolution === null);
+}
 
 /**
- * メッセージ送信処理
+ * Backlog APIを使用して課題を取得
  */
+async function fetchBacklogTickets(env: Env, queryParams: URLSearchParams): Promise<any[]> {
+  const apiUrl = `https://${env.BACKLOG_SPACE_ID}.backlog.jp/api/v2/issues?${queryParams.toString()}`;
+  console.log(`Fetching: ${apiUrl}`);
+
+  const response = await fetch(apiUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Backlog tickets: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+// /**
+//  * メッセージ構築処理
+//  * fetchBacklogTicketsで取得したチケットからメッセージを構築する。
+//  */
+// function formatSlackMessage(tickets: any[]): string {
+//   return tickets
+//     .map((ticket) => `*${ticket.summary}*\n${ticket.url}`)
+//     .join("\n\n");
+// }
+
+// /**
+//  * メッセージ送信処理
+//  */
+// async function sendSlackNotification(env: Env, message: string) {
+//   const slackUrl = "https://slack.com/api/chat.postMessage";
+
+//   const payload = {
+//     channel: "#general", // 送信先のチャンネル（必要なら環境変数化）
+//     text: message,
+//   };
+
+//   const response = await fetch(slackUrl, {
+//     method: "POST",
+//     headers: {
+//       "Content-Type": "application/json",
+//       Authorization: `Bearer ${env.SLACK_BOT_API_KEY}`,
+//     },
+//     body: JSON.stringify(payload),
+//   });
+
+//   if (!response.ok) throw new Error("Failed to send Slack message");
+// }
