@@ -16,28 +16,17 @@ export default {
       const unloggedTimeIssues = await fetchUnloggedTimeIssues(env, today);
       const unresolvedIssues = await fetchUnresolvedIssues(env, today);
 
-      // JSONデータを整形して返す
-      return new Response(
-        JSON.stringify(
-          {
-            updatedIssues,
-            unloggedTimeIssues,
-            unresolvedIssues,
-          },
-          null,
-          2
-        ),
-        {
-        headers: { "Content-Type": "application/json" },
-        }
-      );
+      // メッセージの構築処理
+      const message = formatSlackMessage(updatedIssues, unloggedTimeIssues, unresolvedIssues, env);
+      
+      // 構築したメッセージの確認
+      return new Response (message);
+
     } catch (error) {
       console.error("Error:", error);
       return new Response("Internal Server Error", { status: 500 });
     }
   },
-    //   // 2. 送信メッセージの構築処理
-    //   const message = formatSlackMessage(tickets);
 
     //   // 3. Slack Botによるメッセージ送信処理
     //   await sendSlackNotification(env, message);
@@ -116,15 +105,42 @@ async function fetchBacklogTickets(env: Env, queryParams: URLSearchParams): Prom
   return response.json();
 }
 
-// /**
-//  * メッセージ構築処理
-//  * fetchBacklogTicketsで取得したチケットからメッセージを構築する。
-//  */
-// function formatSlackMessage(tickets: any[]): string {
-//   return tickets
-//     .map((ticket) => `*${ticket.summary}*\n${ticket.url}`)
-//     .join("\n\n");
-// }
+/**
+ * メッセージ構築処理
+ * fetchBacklogTicketsで取得したチケットからメッセージを構築する。
+ */
+function formatSlackMessage(
+  updatedIssues: any[],
+  unloggedTimeIssues: any[],
+  unresolvedIssues: any[],
+  env: Env
+): string {
+  function formatIssues(issues: any[]): string {
+    if (issues.length === 0) {
+      return "* なし";
+    }
+    return issues
+      .map(
+        (issue) =>
+          `* [${issue.summary}](https://${env.BACKLOG_SPACE_ID}.backlog.jp/view/${issue.issueKey}) 担当: ${issue.assignee ? issue.assignee.name : "未設定"}`
+      )
+      .join("\n");
+  }
+
+  return `
+## 完了以外のチケット
+
+${formatIssues(updatedIssues)}
+
+## 完了理由未設定のチケット
+
+${formatIssues(unresolvedIssues)}
+
+## 実績時間未入力のチケット
+
+${formatIssues(unloggedTimeIssues)}
+  `.trim();
+}
 
 // /**
 //  * メッセージ送信処理
